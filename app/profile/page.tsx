@@ -287,13 +287,49 @@ export default function ProfilePage() {
                             </div>
 
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                                {/* ИСПРАВЛЕННАЯ КНОПКА ТЕЛЕГРАМА */}
+                                {/* КНОПКА ТЕЛЕГРАМА */}
                                 <button
-                                    onClick={connectTelegram}
-                                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', padding: '20px', backgroundColor: isTgConnected ? 'var(--bg-main)' : '#2AABEE', border: isTgConnected ? '1px solid var(--border-main)' : 'none', borderRadius: '20px', color: isTgConnected ? 'var(--text-main)' : '#fff', fontSize: '18px', fontWeight: 'bold', cursor: 'pointer' }}
+                                    onClick={async () => {
+                                        if (!userUid) return
+                                        const token = crypto.randomUUID()
+
+                                        // СОХРАНЯЕМ В БД С ПРОВЕРКОЙ ОШИБОК!
+                                        const { error } = await supabase.from('profiles').upsert({ id: userUid, telegram_auth_token: token })
+                                        if (error) {
+                                            alert('Ошибка БД! ' + error.message)
+                                            return
+                                        }
+                                        localStorage.setItem(`tg_connected_${userUid}`, 'true')
+                                        const botName = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME || 'FocusLeague_bot'
+                                        window.open(`https://t.me/${botName}?start=${token}`, '_blank')
+                                    }}
+                                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', padding: '20px', backgroundColor: '#2AABEE', border: 'none', borderRadius: '20px', color: '#fff', fontSize: '18px', fontWeight: 'bold', cursor: 'pointer' }}
                                 >
-                                    <svg viewBox="0 0 24 24" width="24" height="24" fill={isTgConnected ? 'var(--text-secondary)' : 'currentColor'}><path d="M12 0C5.37 0 0 5.37 0 12s5.37 12 12 12 12-5.37 12-12S18.63 0 12 0zm5.89 8.24l-1.96 9.25c-.14.65-.54.81-1.08.51l-3-2.21-1.45 1.39c-.16.16-.3.3-.61.3l.21-3.07 5.6-5.06c.24-.22-.05-.34-.38-.11l-6.92 4.35-2.98-.93c-.65-.2-.66-.65.14-.96l11.64-4.48c.53-.2.99.12.8.96z" /></svg>
-                                    {isTgConnected ? 'Telegram подключен' : 'Привязать Telegram'}
+                                    <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12s5.37 12 12 12 12-5.37 12-12S18.63 0 12 0zm5.89 8.24l-1.96 9.25c-.14.65-.54.81-1.08.51l-3-2.21-1.45 1.39c-.16.16-.3.3-.61.3l.21-3.07 5.6-5.06c.24-.22-.05-.34-.38-.11l-6.92 4.35-2.98-.93c-.65-.2-.66-.65.14-.96l11.64-4.48c.53-.2.99.12.8.96z" /></svg>
+                                    Привязать Telegram
+                                </button>
+                                {/* НОВАЯ КНОПКА ДЛЯ ТЕСТИРОВАНИЯ (ПОЯВЛЯЕТСЯ ТОЛЬКО ПОСЛЕ ПРИВЯЗКИ) */}
+                                <button
+                                    onClick={async () => {
+                                        try {
+                                            const res = await fetch('/api/telegram/send', {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({ message: '👋 Тестовый пинок от FocusLeague! Если ты это видишь, связь работает ИДЕАЛЬНО.' })
+                                            })
+                                            const data = await res.json()
+                                            if (data.success) {
+                                                alert('✅ Сообщение отправлено! Проверь Телеграм.')
+                                            } else {
+                                                alert('❌ Ошибка: ' + (data.error || 'Аккаунт не привязан к боту.'))
+                                            }
+                                        } catch (e) {
+                                            alert('❌ Критическая ошибка сети')
+                                        }
+                                    }}
+                                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', padding: '16px', backgroundColor: 'var(--bg-main)', border: '1px solid var(--accent)', borderRadius: '20px', color: 'var(--accent)', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}
+                                >
+                                    Отправить тестовое сообщение
                                 </button>
 
                                 <button onClick={toggleTheme} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '20px', backgroundColor: 'var(--bg-main)', border: '1px solid var(--border-main)', borderRadius: '20px', color: 'var(--text-main)', fontSize: '18px', fontWeight: '500', cursor: 'pointer' }}>

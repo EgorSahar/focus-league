@@ -19,9 +19,8 @@ export default function DashboardPage() {
     const [newGoal, setNewGoal] = useState('')
     const [newTime, setNewTime] = useState('')
 
-    // Уведомления и ТГ
     const [isTgConnected, setIsTgConnected] = useState(false)
-    const [showTgWarning, setShowTgWarning] = useState(false) // Показывать ли алерт?
+    const [showTgWarning, setShowTgWarning] = useState(false)
 
     useEffect(() => {
         const initUser = async () => {
@@ -32,7 +31,6 @@ export default function DashboardPage() {
             const savedGoals = localStorage.getItem(`goals_${user.id}`)
             if (savedGoals) setGoals(JSON.parse(savedGoals))
 
-            // Проверяем, подключил ли он ТГ в профиле
             setIsTgConnected(localStorage.getItem(`tg_connected_${user.id}`) === 'true')
             setIsMounted(true)
         }
@@ -42,6 +40,39 @@ export default function DashboardPage() {
     useEffect(() => {
         if (isMounted && userUid) localStorage.setItem(`goals_${userUid}`, JSON.stringify(goals))
     }, [goals, userUid, isMounted])
+
+    // --- ИСПРАВЛЕННЫЙ ТАЙМЕР ---
+    useEffect(() => {
+        if (!isMounted || goals.length === 0) return
+
+        const interval = setInterval(() => {
+            const now = new Date()
+            const currentTimeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`
+
+            let updated = false
+            const updatedGoals = goals.map(goal => {
+                if (goal.time === currentTimeStr && !goal.completed && !goal.notified) {
+
+                    // ИСПРАВЛЕННЫЙ ЗАПРОС (Добавлены Headers)
+                    fetch('/api/telegram/send', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ message: `⏰ Время действовать!\nТвоя задача: ${goal.text}` })
+                    })
+                        .then(res => res.json())
+                        .then(data => console.log("Отправка в ТГ:", data))
+
+                    updated = true
+                    return { ...goal, notified: true }
+                }
+                return goal
+            })
+
+            if (updated) setGoals(updatedGoals)
+        }, 15000) // Проверяем каждые 15 секунд для надежности!
+
+        return () => clearInterval(interval)
+    }, [goals, isMounted])
 
     const addGoal = (e: React.FormEvent) => {
         e.preventDefault()
@@ -83,17 +114,12 @@ export default function DashboardPage() {
                         <input type="text" placeholder="Что нужно сделать?" value={newGoal} onChange={(e) => setNewGoal(e.target.value)} style={{ width: '100%', height: '64px', backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-main)', borderRadius: '20px', paddingLeft: '24px', paddingRight: '20px', color: 'var(--text-main)', fontSize: '18px', outline: 'none', boxSizing: 'border-box' }} />
                     </div>
 
-                    {/* ИНПУТ ВРЕМЕНИ С ЗАЩИТОЙ */}
                     <div style={{ position: 'relative', width: '120px' }}>
                         <Clock style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', width: '20px', height: '20px', color: 'var(--text-secondary)' }} />
                         <input type="time" value={newTime} onChange={(e) => setNewTime(e.target.value)} style={{ width: '100%', height: '64px', backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-main)', borderRadius: '20px', paddingLeft: '38px', paddingRight: '12px', color: 'var(--text-main)', fontSize: '16px', outline: 'none', boxSizing: 'border-box', fontFamily: 'sans-serif' }} />
 
-                        {/* Невидимая пленка, если ТГ не подключен */}
                         {!isTgConnected && (
-                            <div
-                                onClick={() => setShowTgWarning(true)}
-                                style={{ position: 'absolute', inset: 0, zIndex: 10, cursor: 'pointer' }}
-                            />
+                            <div onClick={() => setShowTgWarning(true)} style={{ position: 'absolute', inset: 0, zIndex: 10, cursor: 'pointer' }} />
                         )}
                     </div>
 
@@ -126,7 +152,7 @@ export default function DashboardPage() {
                                         </motion.span>
                                         {goal.time && (
                                             <span style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                                <Clock style={{ width: '12px', height: '12px' }} /> Напоминание в {goal.time}
+                                                <Clock style={{ width: '12px', height: '12px' }} /> Напоминание в {goal.time} {goal.notified && '(Отправлено)'}
                                             </span>
                                         )}
                                     </div>
@@ -140,7 +166,6 @@ export default function DashboardPage() {
                 </div>
             </div>
 
-            {/* --- МОДАЛЬНОЕ ОКНО ПРЕДУПРЕЖДЕНИЯ О ТЕЛЕГРАМЕ --- */}
             <AnimatePresence>
                 {showTgWarning && (
                     <div style={{ position: 'fixed', inset: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
@@ -150,12 +175,10 @@ export default function DashboardPage() {
                             <div style={{ width: '64px', height: '64px', backgroundColor: 'rgba(42, 171, 238, 0.1)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px auto' }}>
                                 <Bell style={{ width: '32px', height: '32px', color: '#2AABEE' }} />
                             </div>
-
                             <h2 style={{ fontSize: '22px', fontWeight: 'bold', margin: '0 0 12px 0', color: 'var(--text-main)' }}>Сначала подключи Telegram!</h2>
                             <p style={{ fontSize: '15px', color: 'var(--text-secondary)', margin: '0 0 24px 0', lineHeight: 1.5 }}>
-                                Чтобы мы могли присылать тебе напоминания по времени, нужно привязать бота в Настройках Профиля. <br /><br />Без бота ты всё равно можешь создавать задачи на сегодня, просто оставь поле времени пустым.
+                                Чтобы мы могли присылать тебе напоминания по времени, нужно привязать бота в Настройках Профиля.
                             </p>
-
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                                 <button onClick={() => router.push('/profile')} style={{ width: '100%', padding: '16px', backgroundColor: 'var(--accent)', borderRadius: '16px', border: 'none', color: '#000', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>
                                     Перейти в Профиль
@@ -169,8 +192,8 @@ export default function DashboardPage() {
                 )}
             </AnimatePresence>
 
+            {/* НИЖНЯЯ ПАНЕЛЬ СЮДА НЕ ВЛЕЗАЕТ В ПРИМЕРЕ, ОНА ТАКАЯ ЖЕ КАК БЫЛА */}
             <div style={{ position: 'fixed', bottom: 0, left: 0, width: '100%', backgroundColor: 'var(--bg-main)', opacity: 0.95, borderTop: '1px solid var(--border-main)', display: 'flex', justifyContent: 'center', zIndex: 50 }}>
-                {/* ... Нижняя панель ... */}
                 <div style={{ width: '100%', maxWidth: '700px', display: 'flex', justifyContent: 'space-around', alignItems: 'center', height: '80px', padding: '0 10px' }}>
                     <button style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', background: 'none', border: 'none', cursor: 'pointer' }}>
                         <Home style={{ width: '28px', height: '28px', color: 'var(--accent)' }} />
