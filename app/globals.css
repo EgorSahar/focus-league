@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ТЕМНАЯ ТЕМА (ПО УМОЛЧАНИЮ) */
+:root {
+  --bg-main: #050505;
+  --bg-surface: #111111;
+  --bg-surface-hover: #1a1a1a;
+  --text-main: #ffffff;
+  --text-secondary: #888888;
+  --border-main: #222222;
+  --accent: #39FF14;
+  --accent-glow: rgba(57, 255, 20, 0.15);
+  --danger: #FF3366;
+}
+
+/* СВЕТЛАЯ ТЕМА (ВКЛЮЧАЕТСЯ ПО КНОПКЕ) */
+[data-theme="light"] {
+  --bg-main: #f0f2f5;
+  --bg-surface: #ffffff;
+  --bg-surface-hover: #f9f9f9;
+  --text-main: #0f1419;
+  --text-secondary: #536471;
+  --border-main: #e1e8ed;
+  --accent: #00c853;
+  /* Чуть более темный зеленый для светлого фона */
+  --accent-glow: rgba(0, 200, 83, 0.15);
+  --danger: #e0245e;
+}
+
+body {
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  margin: 0;
+  padding: 0;
+  transition: background-color 0.3s ease, color 0.3s ease;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Фикс для автозаполнения браузера */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 30px var(--bg-surface) inset !important;
+  -webkit-text-fill-color: var(--text-main) !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
