@@ -20,17 +20,14 @@ export default function SquadPage() {
       if (!user) { router.push('/login'); return }
       setUserUid(user.id)
 
-      // ИСЦЕЛЕНИЕ: Берем данные из браузера и обновляем профиль
-      const localName = localStorage.getItem(`name_${user.id}`)
-      const localAvatar = localStorage.getItem(`avatar_${user.id}`)
-      if (localName || localAvatar) {
-        await supabase.from('profiles').update({
-          username: localName || 'Чемпион',
-          avatar_url: localAvatar || null
-        }).eq('id', user.id)
+      // ИСЦЕЛЕНИЕ ПРОФИЛЯ
+      const name = localStorage.getItem(`name_${user.id}`)
+      const ava = localStorage.getItem(`avatar_${user.id}`)
+      if (name || ava) {
+        await supabase.from('profiles').update({ username: name || 'Чемпион', avatar_url: ava || null }).eq('id', user.id)
       }
 
-      // ЗАГРУЗКА ЛЕНТЫ С АВАТАРКАМИ
+      // ЗАГРУЗКА ЛЕНТЫ
       const { data: feed } = await supabase
         .from('posts')
         .select('*, profiles(username, avatar_url, streak)')
@@ -42,25 +39,29 @@ export default function SquadPage() {
     initData()
   }, [])
 
-  const giveFire = async (postId: string, authorId: string, currentLikes: string[]) => {
+  const giveFire = async (pId: string, aId: string, cLikes: string[]) => {
     if (!userUid) return
-    const likesArray = currentLikes || []
-    if (likesArray.includes(userUid)) return // Нельзя лайкнуть дважды
+    const arr = cLikes || []
+    if (arr.includes(userUid)) return // Защита от двойного клика
 
-    const newLikes = [...likesArray, userUid]
-    setPosts(posts.map(p => p.id === postId ? { ...p, likes: newLikes } : p))
-    await supabase.from('posts').update({ likes: newLikes }).eq('id', postId)
+    const nLikes = [...arr, userUid]
+    // Оптимистичное обновление UI
+    setPosts(posts.map(p => p.id === pId ? { ...p, likes: nLikes } : p))
 
-    const { data: author } = await supabase.from('profiles').select('xp').eq('id', authorId).single()
-    if (author) {
-      await supabase.from('profiles').update({ xp: (author.xp || 0) + 10 }).eq('id', authorId)
+    // Обновляем лайки в базе
+    await supabase.from('posts').update({ likes: nLikes }).eq('id', pId)
+
+    // Даем автору поста +10 XP
+    const { data: a } = await supabase.from('profiles').select('xp').eq('id', aId).single()
+    if (a) {
+      await supabase.from('profiles').update({ xp: (a.xp || 0) + 10 }).eq('id', aId)
     }
   }
 
-  if (!isMounted) return <div style={{ minHeight: '100vh', backgroundColor: 'var(--bg-main)' }} />
+  if (!isMounted) return <div style={{ minHeight: '100vh', background: 'var(--bg-main)' }} />
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: 'var(--bg-main)', color: 'var(--text-main)', fontFamily: 'sans-serif', paddingBottom: '120px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg-main)', color: 'var(--text-main)', fontFamily: 'sans-serif', paddingBottom: '120px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       <div style={{ width: '100%', maxWidth: '700px', padding: '0 20px', display: 'flex', flexDirection: 'column', gap: '20px', marginTop: '40px' }}>
 
         <div>
@@ -69,11 +70,11 @@ export default function SquadPage() {
         </div>
 
         {posts.length === 0 ? (
-          <div style={{ textAlign: 'center', color: 'var(--text-secondary)', marginTop: '40px', padding: '40px', backgroundColor: 'var(--bg-surface)', borderRadius: '24px', border: '1px dashed var(--border-main)' }}>
+          <div style={{ textAlign: 'center', color: 'var(--text-secondary)', marginTop: '40px', padding: '40px', background: 'var(--bg-surface)', borderRadius: '24px', border: '1px dashed var(--border-main)' }}>
             Лента пока пуста. <br /><br />Перейди на Главную и сдай Пруф Дня первым!
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
             <AnimatePresence>
-              {posts.map((post) => {
-                const likesArray = post.likes ||
+              {posts.map((p) => {
+                const lks = p.likes ||
