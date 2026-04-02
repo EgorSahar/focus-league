@@ -55,8 +55,9 @@ export default function ProfilePage() {
             const savedAvatar = localStorage.getItem(`avatar_${user.id}`)
             if (savedAvatar) setAvatarPreview(savedAvatar)
 
-            const savedGoals = localStorage.getItem(`goals_${user.id}`)
-            if (savedGoals) setGoals(JSON.parse(savedGoals))
+            // ← ЗАМЕНА ЗДЕСЬ
+            const { data: myProfile } = await supabase.from('profiles').select('goals, streak').eq('id', user.id).single()
+            if (myProfile && myProfile.goals) setGoals(myProfile.goals)
 
             const savedFollows = localStorage.getItem(`follows_${user.id}`)
             if (savedFollows) setFollowedIds(JSON.parse(savedFollows))

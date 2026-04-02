@@ -12,61 +12,45 @@ export default function SquadPage() {
   const supabase = createClient()
 
   const [isMounted, setIsMounted] = useState(false)
-  const [userUid, setUserUid] = useState<string | null>(null)
+  const [uid, setUid] = useState<string | null>(null)
   const [posts, setPosts] = useState<any[]>([])
 
   useEffect(() => {
-    const initData = async () => {
+    const init = async () => {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
         router.push('/login')
         return
       }
-      setUserUid(user.id)
 
-      // ИСЦЕЛЕНИЕ ПРОФИЛЯ
-      const name = localStorage.getItem(`name_${user.id}`)
-      const ava = localStorage.getItem(`avatar_${user.id}`)
-      if (name || ava) {
-        await supabase
-          .from('profiles')
-          .update({ username: name || 'Чемпион', avatar_url: ava || null })
-          .eq('id', user.id)
-      }
+      setUid(user.id)
 
-      // ЗАГРУЗКА ЛЕНТЫ
-      const { data: feed } = await supabase
+      const { data } = await supabase
         .from('posts')
         .select('*, profiles(username, avatar_url, streak)')
         .order('created_at', { ascending: false })
 
-      if (feed) setPosts(feed)
-
+      if (data) setPosts(data)
       setIsMounted(true)
     }
-    initData()
+    init()
   }, [])
 
-  const giveFire = async (pId: string, aId: string, cLikes: string[]) => {
-    if (!userUid) return
+  const giveFire = async (pId: string, aId: string, likes: string[]) => {
+    if (!uid) return
 
-    const arr = cLikes || []
-    if (arr.includes(userUid)) return // Защита от двойного клика
+    const arr = likes || []
+    if (arr.includes(uid)) return
 
-    const nLikes = [...arr, userUid]
+    const nLikes = [...arr, uid]
 
-    // Оптимистичное обновление UI
-    setPosts(posts.map(p =>
-      p.id === pId ? { ...p, likes: nLikes } : p
-    ))
+    // Оптимистичное обновление
+    setPosts(posts.map(p => p.id === pId ? { ...p, likes: nLikes } : p))
 
-    // Обновляем лайки в базе
-    await supabase
-      .from('posts')
-      .update({ likes: nLikes })
-      .eq('id', pId)
+    // Обновляем в базе
+    await supabase.from('posts').update({ likes: nLikes }).eq('id', pId)
 
-    // Даем автору поста +10 XP
+    // Даём +10 XP автору
     const { data: a } = await supabase
       .from('profiles')
       .select('xp')
@@ -81,14 +65,15 @@ export default function SquadPage() {
     }
   }
 
-  if (!isMounted) return <div style={{ minHeight: '100vh', background: 'var(--bg-main)' }} />
+  if (!isMounted) {
+    return <div style={{ minHeight: '100vh', background: 'var(--bg-main)' }} />
+  }
 
   return (
     <div style={{
       minHeight: '100vh',
       background: 'var(--bg-main)',
       color: 'var(--text-main)',
-      fontFamily: 'sans-serif',
       paddingBottom: '120px',
       display: 'flex',
       flexDirection: 'column',
@@ -98,96 +83,168 @@ export default function SquadPage() {
         width: '100%',
         maxWidth: '700px',
         padding: '0 20px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '20px',
         marginTop: '40px'
       }}>
-        <div>
-          <h1 style={{ fontSize: '32px', fontWeight: '800', margin: '0 0 8px 0' }}>Сквад</h1>
-          <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
-            Поддерживай друзей Огнем. 1 Огонь = +10 XP автору!
-          </p>
-        </div>
+        <h1 style={{ fontSize: '32px', fontWeight: '800', margin: '0 0 8px 0' }}>Сквад</h1>
+        <p style={{ color: 'var(--text-secondary)', margin: '0 0 20px 0' }}>
+          1 Огонь = +10 XP автору!
+        </p>
 
         {posts.length === 0 ? (
           <div style={{
             textAlign: 'center',
             color: 'var(--text-secondary)',
-            marginTop: '40px',
             padding: '40px',
             background: 'var(--bg-surface)',
             borderRadius: '24px',
             border: '1px dashed var(--border-main)'
           }}>
-            Лента пока пуста. <br /><br />
-            Перейди на Главную и сдай Пруф Дня первым!
+            Лента пуста.
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
             <AnimatePresence>
-              {posts.map((p) => {
-                const lks = p.likes || []   // ← Исправлено здесь
-                const isLiked = lks.includes(userUid)
+              {posts.map(p => {
+                const lks = p.likes || []
+                const hasLiked = lks.includes(uid)
+                const d = new Date(p.created_at)
+                const time = `${d.getHours()}:${d.getMinutes().toString().padStart(2, '0')}`
 
                 return (
                   <motion.div
                     key={p.id}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 20 }}
                     style={{
-                      backgroundColor: 'var(--bg-surface)',
+                      background: 'var(--bg-surface)',
+                      border: '1px solid var(--border-main)',
                       borderRadius: '24px',
-                      padding: '20px',
-                      border: '1px solid var(--border-main)'
+                      overflow: 'hidden'
                     }}
                   >
-                    {/* Здесь можно добавить рендер поста: аватар, имя, текст и т.д. */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
-                      {p.profiles?.avatar_url ? (
-                        <img
-                          src={p.profiles.avatar_url}
-                          alt="Avatar"
-                          style={{ width: '40px', height: '40px', borderRadius: '50%', objectFit: 'cover' }}
-                        />
-                      ) : (
-                        <User size={40} style={{ color: 'var(--text-secondary)' }} />
-                      )}
-                      <div>
-                        <div style={{ fontWeight: 'bold' }}>{p.profiles?.username || 'Пользователь'}</div>
-                        <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                          Стрик: {p.profiles?.streak || 0} 🔥
-                        </div>
+                    <div style={{ padding: '16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <div style={{
+                        width: '40px',
+                        height: '40px',
+                        borderRadius: '50%',
+                        background: 'var(--bg-main)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        overflow: 'hidden'
+                      }}>
+                        {p.profiles?.avatar_url ? (
+                          <img
+                            src={p.profiles.avatar_url}
+                            alt="ava"
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                        ) : (
+                          <User size={20} color="var(--text-secondary)" />
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <span style={{ fontWeight: 'bold', fontSize: '16px' }}>
+                          {p.profiles?.username || 'Чемпион'}
+                        </span>
+                        <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                          {time} • Стрик: {p.profiles?.streak || 0} 🔥
+                        </span>
                       </div>
                     </div>
 
-                    <p style={{ margin: '12px 0', lineHeight: 1.5 }}>{p.content || p.text}</p>
-
-                    <button
-                      onClick={() => giveFire(p.id, p.user_id || p.profile_id, lks)}
-                      style={{
+                    {/* КАРТИНКА ПРУФА */}
+                    {p.image_url && (
+                      <div style={{
+                        width: '100%',
+                        maxHeight: '400px',
+                        background: '#000',
                         display: 'flex',
+                        justifyContent: 'center',
                         alignItems: 'center',
-                        gap: '8px',
-                        padding: '10px 16px',
-                        backgroundColor: isLiked ? '#FF5E00' : 'var(--bg-main)',
-                        color: isLiked ? '#fff' : 'var(--text-main)',
-                        border: 'none',
-                        borderRadius: '16px',
-                        cursor: 'pointer',
-                        fontWeight: '600'
-                      }}
-                    >
-                      <Flame size={20} />
-                      {lks.length} Огонь
-                    </button>
+                        overflow: 'hidden'
+                      }}>
+                        <img
+                          src={p.image_url}
+                          alt="Proof"
+                          style={{ width: '100%', objectFit: 'cover' }}
+                        />
+                      </div>
+                    )}
+
+                    <div style={{ padding: '16px' }}>
+                      {p.content && (
+                        <p style={{ margin: '0 0 16px 0', fontSize: '15px', lineHeight: '1.5' }}>
+                          {p.content}
+                        </p>
+                      )}
+
+                      <button
+                        onClick={() => giveFire(p.id, p.user_id, lks)}
+                        disabled={hasLiked}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          padding: '10px 20px',
+                          borderRadius: '16px',
+                          border: 'none',
+                          fontWeight: 'bold',
+                          fontSize: '16px',
+                          cursor: hasLiked ? 'default' : 'pointer',
+                          background: hasLiked ? 'var(--bg-main)' : 'rgba(255,94,0,0.1)',
+                          color: hasLiked ? 'var(--text-secondary)' : '#FF5E00'
+                        }}
+                      >
+                        <Flame fill={hasLiked ? 'currentColor' : 'none'} size={20} />
+                        {lks.length} Огней
+                      </button>
+                    </div>
                   </motion.div>
                 )
               })}
             </AnimatePresence>
           </div>
         )}
+      </div>
+
+      {/* НИЖНЯЯ ПАНЕЛЬ */}
+      <div style={{
+        position: 'fixed',
+        bottom: 0,
+        left: 0,
+        width: '100%',
+        background: 'var(--bg-main)',
+        borderTop: '1px solid var(--border-main)',
+        display: 'flex',
+        justifyContent: 'center',
+        zIndex: 50
+      }}>
+        <div style={{
+          width: '100%',
+          maxWidth: '700px',
+          display: 'flex',
+          justifyContent: 'space-around',
+          alignItems: 'center',
+          height: '80px'
+        }}>
+          <button onClick={() => router.push('/dashboard')} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', background: 'none', border: 'none', cursor: 'pointer', opacity: 0.4 }}>
+            <Home size={28} color="var(--text-secondary)" />
+            <span style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-secondary)' }}>Главная</span>
+          </button>
+          <button onClick={() => router.push('/league')} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', background: 'none', border: 'none', cursor: 'pointer', opacity: 0.4 }}>
+            <Trophy size={28} color="var(--text-secondary)" />
+            <span style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-secondary)' }}>Лига</span>
+          </button>
+          <button style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', background: 'none', border: 'none', cursor: 'pointer' }}>
+            <Users size={28} color="var(--accent)" />
+            <span style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--accent)' }}>Сквад</span>
+          </button>
+          <button onClick={() => router.push('/profile')} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', background: 'none', border: 'none', cursor: 'pointer', opacity: 0.4 }}>
+            <User size={28} color="var(--text-secondary)" />
+            <span style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-secondary)' }}>Профиль</span>
+          </button>
+        </div>
       </div>
     </div>
   )
