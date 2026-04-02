@@ -2,14 +2,15 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { motion } from 'framer-motion'
-import { Home, Trophy, Users, User, Medal } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { Home, Trophy, Users, User, Medal, Zap } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '../../utils/supabase/client'
 
 export default function LeaguePage() {
     const router = useRouter()
     const supabase = createClient()
+
     const [isMounted, setIsMounted] = useState(false)
     const [userUid, setUserUid] = useState<string | null>(null)
     const [leaderboard, setLeaderboard] = useState<any[]>([])
@@ -20,8 +21,13 @@ export default function LeaguePage() {
             if (!user) { router.push('/login'); return }
             setUserUid(user.id)
 
-            // Достаем ТОП-50 юзеров, отсортированных по XP
-            const { data: leaders } = await supabase.from('profiles').select('id, username, avatar_url, xp').order('xp', { ascending: false }).limit(50)
+            // Достаем ТОП-50 юзеров из базы, сортируем по XP (по убыванию)
+            const { data: leaders } = await supabase
+                .from('profiles')
+                .select('id, username, avatar_url, xp')
+                .order('xp', { ascending: false })
+                .limit(50)
+
             if (leaders) setLeaderboard(leaders)
             setIsMounted(true)
         }
