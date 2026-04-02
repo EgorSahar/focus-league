@@ -20,15 +20,22 @@ export default function SquadPage() {
       if (!user) { router.push('/login'); return }
       setUserUid(user.id)
 
-      // 1. ИСЦЕЛЕНИЕ
+      // ИСЦЕЛЕНИЕ: Берем данные из браузера и обновляем профиль
       const localName = localStorage.getItem(`name_${user.id}`)
       const localAvatar = localStorage.getItem(`avatar_${user.id}`)
       if (localName || localAvatar) {
-        await supabase.from('profiles').update({ username: localName || 'Чемпион', avatar_url: localAvatar || null }).eq('id', user.id)
+        await supabase.from('profiles').update({
+          username: localName || 'Чемпион',
+          avatar_url: localAvatar || null
+        }).eq('id', user.id)
       }
 
-      // 2. ЗАГРУЗКА ЛЕНТЫ
-      const { data: feed } = await supabase.from('posts').select('*, profiles(username, avatar_url, streak)').order('created_at', { ascending: false })
+      // ЗАГРУЗКА ЛЕНТЫ С АВАТАРКАМИ
+      const { data: feed } = await supabase
+        .from('posts')
+        .select('*, profiles(username, avatar_url, streak)')
+        .order('created_at', { ascending: false })
+
       if (feed) setPosts(feed)
       setIsMounted(true)
     }
@@ -38,14 +45,16 @@ export default function SquadPage() {
   const giveFire = async (postId: string, authorId: string, currentLikes: string[]) => {
     if (!userUid) return
     const likesArray = currentLikes || []
-    if (likesArray.includes(userUid)) return
+    if (likesArray.includes(userUid)) return // Нельзя лайкнуть дважды
 
     const newLikes = [...likesArray, userUid]
     setPosts(posts.map(p => p.id === postId ? { ...p, likes: newLikes } : p))
     await supabase.from('posts').update({ likes: newLikes }).eq('id', postId)
 
     const { data: author } = await supabase.from('profiles').select('xp').eq('id', authorId).single()
-    if (author) await supabase.from('profiles').update({ xp: (author.xp || 0) + 10 }).eq('id', authorId)
+    if (author) {
+      await supabase.from('profiles').update({ xp: (author.xp || 0) + 10 }).eq('id', authorId)
+    }
   }
 
   if (!isMounted) return <div style={{ minHeight: '100vh', backgroundColor: 'var(--bg-main)' }} />
