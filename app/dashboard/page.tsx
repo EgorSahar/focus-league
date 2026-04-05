@@ -1,43 +1,49 @@
 // @ts-nocheck
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Home, Trophy, Users, User, Plus, Check, Circle, Trash2, Clock, Camera, Zap, X } from 'lucide-react'
+import { Home, Trophy, Users, User, Plus, Check, Circle, Trash2, Clock, Camera, Zap, X, ImagePlus, Bell } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '../../utils/supabase/client'
 
-type Goal = { id: number; text: string; completed: boolean; time?: string; notified?: boolean }
-type FloatingXP = { id: number; xp: number; x: number; y: number; type: 'plus' | 'minus' }
+// Вспомогательная функция для получения точной даты (YYYY-MM-DD)
+const getLocalDateStr = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
 export default function DashboardPage() {
     const router = useRouter()
     const supabase = createClient()
 
     const [isMounted, setIsMounted] = useState(false)
-    const [userUid, setUserUid] = useState<string | null>(null)
-    const [profile, setProfile] = useState<any>(null)
+    const [userUid, setUserUid] = useState(null)
+    const [profile, setProfile] = useState(null)
 
-    const [goals, setGoals] = useState<Goal[]>([])
+    const [goals, setGoals] = useState([])
     const [newGoal, setNewGoal] = useState('')
-    const [newTime, setNewTime] = useState('') // ВЕРНУЛИ ВРЕМЯ!
+    const [newTime, setNewTime] = useState('')
 
-    const [xpFloating, setXpFloating] = useState<FloatingXP[]>([])
+    const [xpFloating, setXpFloating] = useState([])
     const [showProofModal, setShowProofModal] = useState(false)
     const [proofText, setProofText] = useState('')
-    const [proofImage, setProofImage] = useState<string | null>(null)
+    const [proofImage, setProofImage] = useState(null)
+    const fileInputRef = useRef(null)
 
-    // МАШИНА ВРЕМЕНИ
+    const [isTgConnected, setIsTgConnected] = useState(false)
+    const [showTgWarning, setShowTgWarning] = useState(false)
+
+    // МАШИНА ВРЕМЕНИ: Точные даты на сегодня и вчера
     const today = new Date()
-    const todayStr = today.toISOString().split('T')[0]
+    const todayStr = getLocalDateStr(today)
     const yesterday = new Date(today)
     yesterday.setDate(yesterday.getDate() - 1)
-    const yesterdayStr = yesterday.toISOString().split('T')[0]
+    const yesterdayStr = getLocalDateStr(yesterday)
+    const todayFormat = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long' }).format(today)
 
+    // 1. ИНИЦИАЛИЗАЦИЯ И СБРОС НОВОГО ДНЯ
     useEffect(() => {
-        const initUser = async () => {
+        const init = async () => {
             const { data: { user } } = await supabase.auth.getUser()
-            if (!user) { router.push('/login'); return }
+            if (!user) return router.push('/login')
             setUserUid(user.id)
 
             let { data: p } = await supabase.from('profiles').select('*').eq('id', user.id).single()
@@ -47,22 +53,23 @@ export default function DashboardPage() {
             }
 
             let currentGoals = p.goals || []
-            let currentStreak = p.streak || 0
+            // Жесткая защита от минуса: Огонек никогда не будет меньше 0
+            let currentStreak = Math.max(0, p.streak || 0)
+            let currentDailyXp = p.daily_goal_xp || 0
 
-            // --- ЛОГИКА НОВОГО ДНЯ (СБРОС ЗАДАЧ) ---
+            // ЕСЛИ НАСТУПИЛ НОВЫЙ ДЕНЬ
             if (p.last_active_date !== todayStr) {
-                // Если он заходил вчера и НЕ доделал задачи -> стрик сгорает в 0
+                // Проверяем вчерашний день
                 if (p.last_active_date === yesterdayStr) {
-                    const finishedYesterday = currentGoals.length > 0 && currentGoals.every(g => g.completed)
-                    if (!finishedYesterday) currentStreak = 0
+                    const finishedYest = currentGoals.length > 0 && currentGoals.every(g => g.completed)
+                    if (!finishedYest) currentStreak = 0 // Если не доделал вчера - стрик сгорает
                 } else if (p.last_active_date) {
-                    // Пропустил больше одного дня -> стрик сгорает
-                    currentStreak = 0
+                    currentStreak = 0 // Пропустил больше дня - стрик сгорает
                 }
 
-                // Наступил новый день: стираем задачи, сбрасываем лимит XP
+                // Очищаем задачи и лимит на сегодня
                 currentGoals = []
-                p.daily_goal_xp = 0
+                currentDailyXp = 0
 
                 await supabase.from('profiles').update({
                     goals: currentGoals,
@@ -72,27 +79,28 @@ export default function DashboardPage() {
                 }).eq('id', user.id)
             }
 
-            setProfile({ ...p, streak: currentStreak })
+            setProfile({ ...p, streak: currentStreak, daily_goal_xp: currentDailyXp })
             setGoals(currentGoals)
+            setIsTgConnected(localStorage.getItem(`tg_connected_${user.id}`) === 'true')
             setIsMounted(true)
         }
-        initUser()
+        init()
     }, [])
 
-    // СОХРАНЕНИЕ ЦЕЛЕЙ В БД
+    // 2. СОХРАНЕНИЕ ЦЕЛЕЙ
     useEffect(() => {
         if (isMounted && userUid) supabase.from('profiles').update({ goals }).eq('id', userUid).then()
     }, [goals, userUid, isMounted])
 
-    // ТАЙМЕР ДЛЯ ТЕЛЕГРАМА (РАБОТАЕТ ЖЕЛЕЗОБЕТОННО)
+    // 3. ТАЙМЕР ТЕЛЕГРАМА
     useEffect(() => {
         if (!isMounted || goals.length === 0) return
         const interval = setInterval(() => {
             const now = new Date()
-            const currentTimeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`
+            const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`
             let updated = false
             const updatedGoals = goals.map(g => {
-                if (g.time === currentTimeStr && !g.completed && !g.notified) {
+                if (g.time === timeStr && !g.completed && !g.notified) {
                     fetch('/api/telegram/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: `⏰ Время действовать!\nТвоя задача: ${g.text}` }) })
                     updated = true
                     return { ...g, notified: true }
@@ -104,87 +112,80 @@ export default function DashboardPage() {
         return () => clearInterval(interval)
     }, [goals, isMounted])
 
-    // --- УМНАЯ ЛОГИКА ДОБАВЛЕНИЯ ЗАДАЧИ ---
-    const addGoal = async (e: React.FormEvent) => {
+    // --- ЛОГИКА ДОБАВЛЕНИЯ ЗАДАЧИ ---
+    const addGoal = async (e) => {
         e.preventDefault()
         if (!newGoal.trim()) return
 
-        const wasAllCompleted = goals.length > 0 && goals.every(g => g.completed)
+        const wasAll = goals.length > 0 && goals.every(g => g.completed)
         const newGoals = [{ id: Date.now(), text: newGoal, completed: false, time: newTime || undefined, notified: false }, ...goals]
 
-        // Если Огонек уже горел, а мы добавили новую невыполненную задачу -> тушим Огонек (стрик -1)
-        let newStreak = profile.streak
-        if (wasAllCompleted) {
-            newStreak -= 1
+        let newStreak = Math.max(0, profile.streak || 0)
+        if (wasAll) {
+            newStreak = Math.max(0, newStreak - 1) // Добавили новую задачу - огонек гаснет
             await supabase.from('profiles').update({ streak: newStreak }).eq('id', userUid)
             setProfile({ ...profile, streak: newStreak })
         }
 
         setGoals(newGoals)
-        setNewGoal('')
-        setNewTime('')
+        setNewGoal(''); setNewTime('')
     }
 
-    // --- УМНАЯ ЛОГИКА ГАЛОЧЕК (XP И СТРИК) ---
-    const toggleGoal = async (id: number, e: React.MouseEvent) => {
+    // --- ЛОГИКА ГАЛОЧЕК (ОПЫТ И УМНЫЙ СТРИК) ---
+    const toggleGoal = async (id, e) => {
         const goal = goals.find(g => g.id === id)
         if (!goal) return
 
-        let currentXp = profile.xp || 0
-        let currentDailyXp = profile.daily_goal_xp || 0
-        let currentStreak = profile.streak || 0
-        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+        let cXp = profile.xp || 0
+        let cDaily = profile.daily_goal_xp || 0
+        let cStreak = Math.max(0, profile.streak || 0)
+        const rect = e.currentTarget.getBoundingClientRect()
 
-        const wasAllCompleted = goals.length > 0 && goals.every(g => g.completed)
+        const wasAll = goals.length > 0 && goals.every(g => g.completed)
         const newGoals = goals.map(g => g.id === id ? { ...g, completed: !g.completed } : g)
-        const isNowAllCompleted = newGoals.length > 0 && newGoals.every(g => g.completed)
+        const isNowAll = newGoals.length > 0 && newGoals.every(g => g.completed)
 
         if (!goal.completed) {
-            // СТАВИМ ГАЛОЧКУ
-            if (currentDailyXp < 50) {
-                currentXp += 5; currentDailyXp += 5
+            // Ставим галочку
+            if (cDaily < 50) {
+                cXp += 5; cDaily += 5
                 setXpFloating(prev => [...prev, { id: Date.now(), xp: 5, x: rect.left + rect.width / 2, y: rect.top, type: 'plus' }])
             }
-            // Если это была ПОСЛЕДНЯЯ задача -> Зажигаем Огонек! (стрик +1)
-            if (!wasAllCompleted && isNowAllCompleted) currentStreak += 1
+            if (!wasAll && isNowAll) cStreak += 1 // Все выполнено -> зажигаем огонек!
         } else {
-            // УБИРАЕМ ГАЛОЧКУ
-            if (currentDailyXp > 0) {
-                currentXp -= 5; currentDailyXp -= 5
+            // Убираем галочку
+            if (cDaily > 0) {
+                cXp -= 5; cDaily -= 5
                 setXpFloating(prev => [...prev, { id: Date.now(), xp: -5, x: rect.left + rect.width / 2, y: rect.top, type: 'minus' }])
             }
-            // Если Огонек горел, а мы убрали галочку -> Тушим Огонек! (стрик -1)
-            if (wasAllCompleted && !isNowAllCompleted) currentStreak -= 1
+            if (wasAll && !isNowAll) cStreak = Math.max(0, cStreak - 1) // Сняли галочку -> тушим огонек
         }
 
-        await supabase.from('profiles').update({ xp: currentXp, daily_goal_xp: currentDailyXp, streak: currentStreak }).eq('id', userUid)
-        setProfile({ ...profile, xp: currentXp, daily_goal_xp: currentDailyXp, streak: currentStreak })
+        await supabase.from('profiles').update({ xp: cXp, daily_goal_xp: cDaily, streak: cStreak }).eq('id', userUid)
+        setProfile({ ...profile, xp: cXp, daily_goal_xp: cDaily, streak: cStreak })
         setGoals(newGoals)
     }
 
-    const deleteGoal = async (id: number, e: React.MouseEvent) => {
+    const deleteGoal = async (id, e) => {
         e.stopPropagation()
+        const wasAll = goals.length > 0 && goals.every(g => g.completed)
         const newGoals = goals.filter(g => g.id !== id)
+        const isNowAll = newGoals.length > 0 && newGoals.every(g => g.completed)
 
-        // Проверяем стрик после удаления
-        const wasAllCompleted = goals.length > 0 && goals.every(g => g.completed)
-        const isNowAllCompleted = newGoals.length > 0 && newGoals.every(g => g.completed)
-        let newStreak = profile.streak
-
-        if (!wasAllCompleted && isNowAllCompleted) {
+        let newStreak = Math.max(0, profile.streak || 0)
+        if (!wasAll && isNowAll) {
             newStreak += 1
             await supabase.from('profiles').update({ streak: newStreak }).eq('id', userUid)
             setProfile({ ...profile, streak: newStreak })
         }
-
         setGoals(newGoals)
     }
 
-    // --- ПРУФ ДНЯ ---
-    const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // --- ПРУФ ДНЯ (ОБЯЗАТЕЛЬНО ФОТО) ---
+    const handleImageChange = (e) => {
         const file = e.target.files?.[0]
         if (file) {
-            const r = new FileReader(); r.onloadend = () => setProofImage(r.result as string); r.readAsDataURL(file)
+            const r = new FileReader(); r.onloadend = () => setProofImage(r.result); r.readAsDataURL(file)
         }
     }
 
@@ -197,8 +198,6 @@ export default function DashboardPage() {
         setShowProofModal(false); setProofText(''); setProofImage(null)
         setXpFloating(prev => [...prev, { id: Date.now(), xp: 100, x: window.innerWidth / 2, y: window.innerHeight / 2, type: 'plus' }])
     }
-
-    const todayFormat = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long' }).format(today)
 
     if (!isMounted || !profile) return <div style={{ minHeight: '100vh', background: 'var(--bg-main)' }} />
 
@@ -224,13 +223,13 @@ export default function DashboardPage() {
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--accent)', fontWeight: '900', fontSize: '20px' }}><Zap fill="currentColor" size={20} /> {profile.xp || 0} XP</div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>Лимит задач: {profile.daily_goal_xp || 0}/50</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>Лимит задач: {profile.daily_goal_xp || 0}/50 XP</div>
                         <div style={{ width: '100px', height: '6px', background: 'var(--border-main)', borderRadius: '3px', marginTop: '4px', overflow: 'hidden' }}><motion.div initial={{ width: 0 }} animate={{ width: `${batteryPercent}%` }} style={{ height: '100%', background: 'var(--accent)' }} /></div>
                     </div>
                 </div>
 
                 {/* ПРУФ */}
-                <motion.button whileHover={{ scale: isProofDoneToday ? 1 : 1.02 }} onClick={() => !isProofDoneToday && setShowProofModal(true)} style={{ width: '100%', padding: '20px', borderRadius: '24px', border: isProofDoneToday ? '1px solid var(--border-main)' : 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: isProofDoneToday ? 'default' : 'pointer', background: isProofDoneToday ? 'var(--bg-surface)' : 'linear-gradient(135deg, #FF5E00 0%, #FF9900 100%)', color: isProofDoneToday ? 'var(--text-secondary)' : '#fff', boxShadow: isProofDoneToday ? 'none' : '0 10px 30px rgba(255, 94, 0, 0.3)' }}>
+                <motion.button whileHover={{ scale: isProofDoneToday ? 1 : 1.02 }} onClick={() => !isProofDoneToday && setShowProofModal(true)} style={{ width: '100%', padding: '20px', borderRadius: '24px', border: isProofDoneToday ? '1px solid var(--border-main)' : 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: isProofDoneToday ? 'default' : 'pointer', background: isProofDoneToday ? 'var(--bg-surface)' : 'linear-gradient(135deg, #FF5E00 0%, #FF9900 100%)', color: isProofDoneToday ? 'var(--text-secondary)' : '#fff' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                         <div style={{ width: '48px', height: '48px', background: isProofDoneToday ? 'var(--bg-main)' : 'rgba(255,255,255,0.2)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{isProofDoneToday ? <Check size={24} /> : <Camera size={24} />}</div>
                         <div style={{ textAlign: 'left' }}>
@@ -246,14 +245,17 @@ export default function DashboardPage() {
                     <div style={{ position: 'relative', flex: 1 }}>
                         <input type="text" placeholder="Что нужно сделать?" value={newGoal} onChange={(e) => setNewGoal(e.target.value)} style={{ width: '100%', height: '64px', background: 'var(--bg-surface)', border: '1px solid var(--border-main)', borderRadius: '20px', paddingLeft: '24px', paddingRight: '20px', color: 'var(--text-main)', fontSize: '18px', outline: 'none', boxSizing: 'border-box' }} />
                     </div>
+
                     <div style={{ position: 'relative', width: '120px' }}>
                         <Clock style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', width: '20px', height: '20px', color: 'var(--text-secondary)' }} />
                         <input type="time" value={newTime} onChange={(e) => setNewTime(e.target.value)} style={{ width: '100%', height: '64px', background: 'var(--bg-surface)', border: '1px solid var(--border-main)', borderRadius: '20px', paddingLeft: '38px', paddingRight: '12px', color: 'var(--text-main)', fontSize: '16px', outline: 'none', boxSizing: 'border-box' }} />
+                        {!isTgConnected && <div onClick={() => setShowTgWarning(true)} style={{ position: 'absolute', inset: 0, zIndex: 10, cursor: 'pointer' }} />}
                     </div>
+
                     <button type="submit" disabled={!newGoal.trim()} style={{ width: '64px', height: '64px', background: newGoal.trim() ? 'var(--accent)' : 'var(--border-main)', color: newGoal.trim() ? '#000' : 'var(--text-secondary)', borderRadius: '20px', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: newGoal.trim() ? 'pointer' : 'default', transition: 'all 0.3s', flexShrink: 0 }}><Plus size={28} /></button>
                 </form>
 
-                {/* СПИСОК */}
+                {/* СПИСОК ЦЕЛЕЙ */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     <AnimatePresence mode="popLayout">
                         {goals.map((g) => (
@@ -265,9 +267,8 @@ export default function DashboardPage() {
                                         ) : (<Circle size={28} color="var(--text-secondary)" />)}
                                     </div>
                                     <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                        <motion.span animate={{ color: g.completed ? 'var(--text-secondary)' : 'var(--text-main)' }} style={{ fontSize: '18px', fontWeight: '500', position: 'relative' }}>
+                                        <motion.span animate={{ color: g.completed ? 'var(--text-secondary)' : 'var(--text-main)' }} style={{ fontSize: '18px', fontWeight: '500', position: 'relative', textDecoration: g.completed ? 'line-through' : 'none' }}>
                                             {g.text}
-                                            {g.completed && <motion.div layoutId={`strike-${g.id}`} initial={{ width: 0 }} animate={{ width: '100%' }} style={{ position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)', height: '2px', background: 'var(--text-secondary)' }} />}
                                         </motion.span>
                                         {g.time && <span style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}><Clock size={12} /> {g.time} {g.notified && '✓'}</span>}
                                     </div>
@@ -279,7 +280,7 @@ export default function DashboardPage() {
                 </div>
             </div>
 
-            {/* МОДАЛКА ПРУФА (ОБЯЗАТЕЛЬНОЕ ФОТО) */}
+            {/* МОДАЛКА ПРУФА (ОБЯЗАТЕЛЬНО ФОТО) */}
             <AnimatePresence>
                 {showProofModal && (
                     <div style={{ position: 'fixed', inset: 0, zIndex: 100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
@@ -295,7 +296,7 @@ export default function DashboardPage() {
                                 {proofImage ? (
                                     <><img src={proofImage} alt="Proof" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /><button onClick={() => setProofImage(null)} style={{ position: 'absolute', top: '10px', right: '10px', background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '50%', padding: '8px', cursor: 'pointer', color: '#fff' }}><X size={16} /></button></>
                                 ) : (
-                                    <div onClick={() => fileInputRef.current?.click()} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', color: 'var(--text-secondary)', cursor: 'pointer' }}><Camera size={40} style={{ marginBottom: '8px' }} /><span>Нажми, чтобы загрузить фото</span></div>
+                                    <div onClick={() => fileInputRef.current?.click()} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', color: 'var(--text-secondary)', cursor: 'pointer' }}><ImagePlus size={40} style={{ marginBottom: '8px' }} /><span>Нажми, чтобы загрузить фото</span></div>
                                 )}
                                 <input type="file" ref={fileInputRef} onChange={handleImageChange} accept="image/*" style={{ display: 'none' }} />
                             </div>
@@ -309,7 +310,24 @@ export default function DashboardPage() {
                 )}
             </AnimatePresence>
 
-            {/* НИЖНЯЯ ПАНЕЛЬ НАВИГАЦИИ */}
+            {/* АЛЕРТ ТЕЛЕГРАМА */}
+            <AnimatePresence>
+                {showTgWarning && (
+                    <div style={{ position: 'fixed', inset: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowTgWarning(false)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.8)' }} />
+                        <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} style={{ width: '100%', maxWidth: '400px', background: 'var(--bg-surface)', borderRadius: '32px', border: '1px solid var(--border-main)', position: 'relative', zIndex: 101, padding: '30px', textAlign: 'center' }}>
+                            <div style={{ width: '64px', height: '64px', background: 'rgba(42, 171, 238, 0.1)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px auto' }}><Bell size={32} color="#2AABEE" /></div>
+                            <h2 style={{ fontSize: '22px', fontWeight: 'bold', margin: '0 0 12px 0' }}>Сначала подключи Telegram!</h2>
+                            <p style={{ fontSize: '15px', color: 'var(--text-secondary)', margin: '0 0 24px 0', lineHeight: 1.5 }}>Чтобы мы могли присылать напоминания по времени, привяжи бота в Профиле.</p>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                <button onClick={() => router.push('/profile')} style={{ width: '100%', padding: '16px', background: 'var(--accent)', borderRadius: '16px', border: 'none', color: '#000', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>Перейти в Профиль</button>
+                                <button onClick={() => setShowTgWarning(false)} style={{ width: '100%', padding: '16px', background: 'transparent', borderRadius: '16px', border: '1px solid var(--border-main)', color: 'var(--text-main)', fontSize: '16px', fontWeight: '500', cursor: 'pointer' }}>Создать задачу без времени</button>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+
             <div style={{ position: 'fixed', bottom: 0, left: 0, width: '100%', background: 'var(--bg-main)', opacity: 0.95, borderTop: '1px solid var(--border-main)', display: 'flex', justifyContent: 'center', zIndex: 50 }}>
                 <div style={{ width: '100%', maxWidth: '700px', display: 'flex', justifyContent: 'space-around', alignItems: 'center', height: '80px', padding: '0 10px' }}>
                     <button style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', background: 'none', border: 'none', cursor: 'pointer' }}><Home size={28} color="var(--accent)" /><span style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--accent)' }}>Главная</span></button>
